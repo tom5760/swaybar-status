@@ -115,7 +115,7 @@ func (c *Core) signalSubscribe(name string) (<-chan *dbus.Signal, func(), error)
 
 	unsub := func() {
 		if err := c.stopListeningForSignal(name); err != nil {
-			log.Println("failed to stop listening for signal:", err)
+			log.Printf("failed to stop listening for signal %s: %v", name, err)
 		}
 
 		c.conn.RemoveSignal(sigChan)
@@ -135,7 +135,7 @@ func (c *Core) listenForSignal(name string) error {
 }
 
 func (c *Core) stopListeningForSignal(name string) error {
-	if err := c.obj.Call(coreMethodStopListeningForSignal, 0, name, []dbus.ObjectPath{}).Store(); err != nil {
+	if err := c.obj.Call(coreMethodStopListeningForSignal, 0, name).Store(); err != nil {
 		return fmt.Errorf("failed to make dbus call: %w", err)
 	}
 
