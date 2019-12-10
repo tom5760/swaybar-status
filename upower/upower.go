@@ -35,7 +35,7 @@ type UPower struct {
 	obj *utils.DBusObject
 }
 
-// NewUPower creates a new instance of the UPower interface.
+// New creates a new instance of the UPower interface.
 func New() (*UPower, error) {
 	conn, err := dbus.SystemBus()
 	if err != nil {
