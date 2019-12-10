@@ -39,7 +39,10 @@ func run() int {
 	clickChan := make(chan ClickEvent, 1)
 	blocksChan := make(chan []Block, 1)
 
-	group.Go(recv(ctx, clickChan))
+	// Don't need to explicitly stop this goroutine.  Hard to cancel reading from
+	// stdin.
+	go recv(ctx, clickChan)
+
 	group.Go(send(ctx, blocksChan))
 	group.Go(status(ctx, blocksChan, clickChan))
 
@@ -51,31 +54,30 @@ func run() int {
 	return 0
 }
 
-func recv(ctx context.Context, clickChan chan<- ClickEvent) func() error {
-	return func() error {
+func recv(ctx context.Context, clickChan chan<- ClickEvent) func() {
+	return func() {
 		decoder := json.NewDecoder(inputReader)
 
 		tok, err := decoder.Token()
 		if err != nil {
-			return fmt.Errorf("failed to read initial input token: %w", err)
+			log.Println("failed to read initial input token:", err)
+			return
 		}
 
 		if delim, ok := tok.(json.Delim); !ok || delim != '[' {
-			return fmt.Errorf("unexpected initial input token: %v", tok)
+			log.Println("unexpected initial input token:", tok)
+			return
 		}
 
 		for ctx.Err() == nil {
 			var evt ClickEvent
 			if err := decoder.Decode(&evt); err != nil {
-				return fmt.Errorf("failed to decode click event: %w", err)
+				log.Println("failed to decode click event:", err)
+				return
 			}
 
 			clickChan <- evt
 		}
-
-		close(clickChan)
-
-		return nil
 	}
 }
 
@@ -128,6 +130,7 @@ func status(ctx context.Context, blocksChan chan<- []Block, clickChan <-chan Cli
 
 		statusFuncs := []func(context.Context, chan<- Block) func() error{
 			statusBattery,
+			//statusNetwork,
 			statusTime,
 			statusVolume,
 		}
@@ -135,6 +138,8 @@ func status(ctx context.Context, blocksChan chan<- []Block, clickChan <-chan Cli
 		for _, statusFunc := range statusFuncs {
 			group.Go(statusFunc(statusCtx, blockChan))
 		}
+
+		var blocks []Block
 
 	loop:
 		for ctx.Err() == nil {
@@ -144,7 +149,11 @@ func status(ctx context.Context, blocksChan chan<- []Block, clickChan <-chan Cli
 					name:     block.Name,
 					instance: block.Instance,
 				}
-				body[key] = block
+				if block.Remove {
+					delete(body, key)
+				} else {
+					body[key] = block
+				}
 
 			case evt := <-clickChan:
 				key := blockKey{
@@ -154,7 +163,7 @@ func status(ctx context.Context, blocksChan chan<- []Block, clickChan <-chan Cli
 				block, ok := body[key]
 				if !ok {
 					log.Println("click event on non-existent key:", key)
-					continue loop
+					continue
 				}
 				if block.ClickHandler != nil {
 					block.ClickHandler(evt)
@@ -164,7 +173,7 @@ func status(ctx context.Context, blocksChan chan<- []Block, clickChan <-chan Cli
 				break loop
 			}
 
-			blocks := make([]Block, 0, len(body))
+			blocks = blocks[:0]
 
 			for _, block := range body {
 				blocks = append(blocks, block)

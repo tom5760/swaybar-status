@@ -84,6 +84,9 @@ type Block struct {
 
 	// Called when the block is clicked on.
 	ClickHandler func(ClickEvent) `json:"-"`
+
+	// If true, block is removed from the status line instead of added.
+	Remove bool `json:"-"`
 }
 
 // ClickEvents are reported if requested in the header.
