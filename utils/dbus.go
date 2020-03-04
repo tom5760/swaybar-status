@@ -119,6 +119,34 @@ func (o *DBusObject) PropertyString(name string) (string, error) {
 	return x, nil
 }
 
+func (o *DBusObject) PropertyByte(name string) (byte, error) {
+	v, err := o.Property(name)
+	if err != nil {
+		return 0, err
+	}
+
+	x, ok := v.(byte)
+	if !ok {
+		return 0, fmt.Errorf("unexpected variant type; got %T; expected %T", v, x)
+	}
+
+	return x, nil
+}
+
+func (o *DBusObject) PropertyByteSlice(name string) ([]byte, error) {
+	v, err := o.Property(name)
+	if err != nil {
+		return nil, err
+	}
+
+	x, ok := v.([]byte)
+	if !ok {
+		return nil, fmt.Errorf("unexpected variant type; got %T; expected %T", v, x)
+	}
+
+	return x, nil
+}
+
 func (o *DBusObject) PropertyObjectPath(name string) (dbus.ObjectPath, error) {
 	v, err := o.Property(name)
 	if err != nil {

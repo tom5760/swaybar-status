@@ -9,23 +9,35 @@ import (
 	"github.com/tom5760/swaybar-status/utils"
 )
 
+type (
+	ActiveConnectionType        string
+	ActiveConnectionState       uint32
+	ActiveConnectionStateReason uint32
+
+	ActiveConnectionStateChange struct {
+		State  ActiveConnectionState
+		Reason ActiveConnectionStateReason
+	}
+
+	ActiveConnection struct {
+		obj *utils.DBusObject
+	}
+)
+
 const (
 	activeConnectionIface = nmIface + ".Connection.Active"
 
-	activeConnectionPropType  = activeConnectionIface + ".Type"
-	activeConnectionPropState = activeConnectionIface + ".State"
+	activeConnectionPropDevices = activeConnectionIface + ".Devices"
+	activeConnectionPropType    = activeConnectionIface + ".Type"
+	activeConnectionPropState   = activeConnectionIface + ".State"
 
 	activeConnectionSigStateChanged = activeConnectionIface + ".StateChanged"
 )
-
-type ActiveConnectionType string
 
 const (
 	ActiveConnectionEthernet ActiveConnectionType = "802-3-ethernet"
 	ActiveConnectionWireless ActiveConnectionType = "802-11-wireless"
 )
-
-type ActiveConnectionState uint32
 
 const (
 	// The state of the connection is unknown
@@ -39,8 +51,6 @@ const (
 	// The network connection is disconnected and will be removed
 	ActiveConnectionStateDeactivated
 )
-
-type ActiveConnectionStateReason uint32
 
 const (
 	// The reason for the active connection state change is unknown.
@@ -75,15 +85,6 @@ const (
 	ActiveConnectionStateReasonDeviceRemoved
 )
 
-type ActiveConnectionStateChange struct {
-	State  ActiveConnectionState
-	Reason ActiveConnectionStateReason
-}
-
-type ActiveConnection struct {
-	obj *utils.DBusObject
-}
-
 func newActiveConnection(path dbus.ObjectPath) (*ActiveConnection, error) {
 	bus, err := dbus.SystemBus()
 	if err != nil {
@@ -95,6 +96,27 @@ func newActiveConnection(path dbus.ObjectPath) (*ActiveConnection, error) {
 	}
 
 	return activeConn, nil
+}
+
+// Devices returns an array of devices which are part of this active
+// connection.
+func (c *ActiveConnection) Devices() ([]*Device, error) {
+	paths, err := c.obj.PropertySliceObjectPath(activeConnectionPropDevices)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the Devices property: %w", err)
+	}
+
+	devices := make([]*Device, len(paths))
+
+	for i, path := range paths {
+		device, err := newDevice(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create new device: %w", err)
+		}
+		devices[i] = device
+	}
+
+	return devices, nil
 }
 
 // Type returns the type of the connection, provided as a convenience so that

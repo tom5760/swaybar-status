@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"sort"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -23,10 +24,13 @@ var (
 )
 
 func main() {
-	os.Exit(run())
+	if err := run(); err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
 }
 
-func run() int {
+func run() error {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Println(r)
@@ -39,45 +43,44 @@ func run() int {
 	clickChan := make(chan ClickEvent, 1)
 	blocksChan := make(chan []Block, 1)
 
-	// Don't need to explicitly stop this goroutine.  Hard to cancel reading from
-	// stdin.
-	go recv(ctx, clickChan)
-
+	group.Go(recv(ctx, clickChan))
 	group.Go(send(ctx, blocksChan))
 	group.Go(status(ctx, blocksChan, clickChan))
 
 	if err := group.Wait(); err != nil {
-		log.Println(err)
-		return 1
+		return err
 	}
 
-	return 0
+	if err := os.Stdin.SetReadDeadline(time.Now()); err != nil {
+		log.Println("failed to set stdin read deadline:", err)
+	}
+
+	return nil
 }
 
-func recv(ctx context.Context, clickChan chan<- ClickEvent) func() {
-	return func() {
+func recv(ctx context.Context, clickChan chan<- ClickEvent) func() error {
+	return func() error {
 		decoder := json.NewDecoder(inputReader)
 
 		tok, err := decoder.Token()
 		if err != nil {
-			log.Println("failed to read initial input token:", err)
-			return
+			return fmt.Errorf("failed to read initial input token: %w", err)
 		}
 
 		if delim, ok := tok.(json.Delim); !ok || delim != '[' {
-			log.Println("unexpected initial input token:", tok)
-			return
+			return fmt.Errorf("unexpected initial input token: %v", tok)
 		}
 
 		for ctx.Err() == nil {
 			var evt ClickEvent
 			if err := decoder.Decode(&evt); err != nil {
-				log.Println("failed to decode click event:", err)
-				return
+				return fmt.Errorf("failed to decode click event: %w", err)
 			}
 
 			clickChan <- evt
 		}
+
+		return nil
 	}
 }
 
@@ -130,7 +133,7 @@ func status(ctx context.Context, blocksChan chan<- []Block, clickChan <-chan Cli
 
 		statusFuncs := []func(context.Context, chan<- Block) func() error{
 			statusBattery,
-			//statusNetwork,
+			statusNetwork,
 			statusTime,
 			statusVolume,
 		}

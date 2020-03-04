@@ -8,6 +8,11 @@ import (
 	"github.com/tom5760/swaybar-status/networkmanager"
 )
 
+const (
+	networkIconEthernet = "🖧"
+	networkIconWireless = "📶"
+)
+
 func statusNetwork(ctx context.Context, blockChan chan<- Block) func() error {
 	return func() error {
 		nm, err := networkmanager.New()
@@ -36,6 +41,20 @@ func statusNetwork(ctx context.Context, blockChan chan<- Block) func() error {
 				return fmt.Errorf("failed to get connection state: %w", err)
 			}
 
+			devices, err := conn.Devices()
+			if err != nil {
+				return fmt.Errorf("failed to get connection devices: %w", err)
+			}
+
+			for _, device := range devices {
+				typ, err := device.Type()
+				if err != nil {
+					return fmt.Errorf("failed to get device type: %w", err)
+				}
+
+				log.Printf("device %v: %v", device, typ)
+			}
+
 			switch typ {
 			case networkmanager.ActiveConnectionEthernet:
 				var label string
@@ -49,22 +68,27 @@ func statusNetwork(ctx context.Context, blockChan chan<- Block) func() error {
 				case networkmanager.ActiveConnectionStateDeactivated:
 					label = "down"
 				}
-				block.FullText = fmt.Sprintf("🖧 %s", label)
+				block.FullText = fmt.Sprintf("%s %s", networkIconEthernet, label)
 
 			case networkmanager.ActiveConnectionWireless:
+				status, err := getWifiStatus(conn)
+				if err != nil {
+					log.Println("failed to get wifi status:", err)
+				}
+
 				var label string
 				switch state {
 				case networkmanager.ActiveConnectionStateActivating:
 					label = "activating..."
 				case networkmanager.ActiveConnectionStateActivated:
-					label = "up"
+					label = ""
 				case networkmanager.ActiveConnectionStateDeactivating:
 					label = "deactivating..."
 				case networkmanager.ActiveConnectionStateDeactivated:
 					label = "down"
 				}
 
-				block.FullText = fmt.Sprintf("📶 %s", label)
+				block.FullText = fmt.Sprintf("%s %s%s", networkIconWireless, status, label)
 
 			default:
 				log.Println("unexpected connection type:", typ)
@@ -76,4 +100,50 @@ func statusNetwork(ctx context.Context, blockChan chan<- Block) func() error {
 
 		return nil
 	}
+}
+
+func getWifiStatus(conn *networkmanager.ActiveConnection) (string, error) {
+	dev, err := findWifiDev(conn)
+	if err != nil {
+		return "", fmt.Errorf("failed to find wifi device: %w", err)
+	}
+
+	wifi := dev.WirelessDevice()
+
+	ap, err := wifi.ActiveAccessPoint()
+	if err != nil {
+		return "", fmt.Errorf("failed to get active access point: %w", err)
+	}
+
+	ssid, err := ap.SSID()
+	if err != nil {
+		return "", fmt.Errorf("failed to get SSID: %w", err)
+	}
+
+	strength, err := ap.Strength()
+	if err != nil {
+		return "", fmt.Errorf("failed to get Strength: %w", err)
+	}
+
+	return fmt.Sprintf("%s (%v%%)", string(ssid), strength), nil
+}
+
+func findWifiDev(conn *networkmanager.ActiveConnection) (*networkmanager.Device, error) {
+	devices, err := conn.Devices()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection devices: %w", err)
+	}
+
+	for _, device := range devices {
+		typ, err := device.Type()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get device type: %w", err)
+		}
+
+		if typ == networkmanager.DeviceTypeWifi {
+			return device, nil
+		}
+	}
+
+	return nil, fmt.Errorf("wifi device not found")
 }
