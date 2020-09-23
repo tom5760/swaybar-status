@@ -27,6 +27,8 @@ type (
 const (
 	activeConnectionIface = nmIface + ".Connection.Active"
 
+	activeConnectionPropID      = activeConnectionIface + ".Id"
+	activeConnectionPropUUID    = activeConnectionIface + ".Uuid"
 	activeConnectionPropDevices = activeConnectionIface + ".Devices"
 	activeConnectionPropType    = activeConnectionIface + ".Type"
 	activeConnectionPropState   = activeConnectionIface + ".State"
@@ -35,6 +37,7 @@ const (
 )
 
 const (
+	ActiveConnectionBridge   ActiveConnectionType = "bridge"
 	ActiveConnectionEthernet ActiveConnectionType = "802-3-ethernet"
 	ActiveConnectionWireless ActiveConnectionType = "802-11-wireless"
 )
@@ -117,6 +120,28 @@ func (c *ActiveConnection) Devices() ([]*Device, error) {
 	}
 
 	return devices, nil
+}
+
+// ID returns the ID of the connection, provided as a convenience so that
+// clients do not have to retrieve all connection details.
+func (c *ActiveConnection) ID() (string, error) {
+	id, err := c.obj.PropertyString(activeConnectionPropID)
+	if err != nil {
+		return "", fmt.Errorf("failed to read the ID property: %w", err)
+	}
+
+	return id, nil
+}
+
+// UUID returns the UUID of the connection, provided as a convenience so that
+// clients do not have to retrieve all connection details.
+func (c *ActiveConnection) UUID() (string, error) {
+	id, err := c.obj.PropertyString(activeConnectionPropUUID)
+	if err != nil {
+		return "", fmt.Errorf("failed to read the UUID property: %w", err)
+	}
+
+	return id, nil
 }
 
 // Type returns the type of the connection, provided as a convenience so that

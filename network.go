@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/tom5760/swaybar-status/networkmanager"
 )
@@ -20,82 +21,115 @@ func statusNetwork(ctx context.Context, blockChan chan<- Block) func() error {
 			return fmt.Errorf("failed to create networkmanager: %w", err)
 		}
 
-		conns, err := nm.ActiveConnections()
-		if err != nil {
-			return fmt.Errorf("failed to get active connections: %w", err)
-		}
+		uuids := make(map[string]bool)
 
-		for i, conn := range conns {
-			block := Block{
-				Name:     "30-networking",
-				Instance: fmt.Sprintf("%v", i),
-			}
-
-			typ, err := conn.Type()
+		for ctx.Err() == nil {
+			conns, err := nm.ActiveConnections()
 			if err != nil {
-				return fmt.Errorf("failed to get connection type: %w", err)
+				return fmt.Errorf("failed to get active connections: %w", err)
 			}
 
-			state, err := conn.State()
-			if err != nil {
-				return fmt.Errorf("failed to get connection state: %w", err)
+			for uuid := range uuids {
+				uuids[uuid] = false
 			}
 
-			devices, err := conn.Devices()
-			if err != nil {
-				return fmt.Errorf("failed to get connection devices: %w", err)
-			}
-
-			for _, device := range devices {
-				typ, err := device.Type()
+			for _, conn := range conns {
+				uuid, err := conn.UUID()
 				if err != nil {
-					return fmt.Errorf("failed to get device type: %w", err)
+					return fmt.Errorf("failed to get connection id: %w", err)
 				}
 
-				log.Printf("device %v: %v", device, typ)
-			}
-
-			switch typ {
-			case networkmanager.ActiveConnectionEthernet:
-				var label string
-				switch state {
-				case networkmanager.ActiveConnectionStateActivating:
-					label = "activating..."
-				case networkmanager.ActiveConnectionStateActivated:
-					label = "up"
-				case networkmanager.ActiveConnectionStateDeactivating:
-					label = "deactivating..."
-				case networkmanager.ActiveConnectionStateDeactivated:
-					label = "down"
+				block := Block{
+					Name:     "20-networking",
+					Instance: uuid,
 				}
-				block.FullText = fmt.Sprintf("%s %s", networkIconEthernet, label)
 
-			case networkmanager.ActiveConnectionWireless:
-				status, err := getWifiStatus(conn)
+				uuids[uuid] = true
+
+				typ, err := conn.Type()
 				if err != nil {
-					log.Println("failed to get wifi status:", err)
+					return fmt.Errorf("failed to get connection type: %w", err)
 				}
 
-				var label string
-				switch state {
-				case networkmanager.ActiveConnectionStateActivating:
-					label = "activating..."
-				case networkmanager.ActiveConnectionStateActivated:
-					label = ""
-				case networkmanager.ActiveConnectionStateDeactivating:
-					label = "deactivating..."
-				case networkmanager.ActiveConnectionStateDeactivated:
-					label = "down"
+				state, err := conn.State()
+				if err != nil {
+					return fmt.Errorf("failed to get connection state: %w", err)
 				}
 
-				block.FullText = fmt.Sprintf("%s %s%s", networkIconWireless, status, label)
+				devices, err := conn.Devices()
+				if err != nil {
+					return fmt.Errorf("failed to get connection devices: %w", err)
+				}
 
-			default:
-				log.Println("unexpected connection type:", typ)
-				continue
+				for _, device := range devices {
+					typ, err := device.Type()
+					if err != nil {
+						return fmt.Errorf("failed to get device type: %w", err)
+					}
+
+					log.Printf("device %v: %v", device, typ)
+				}
+
+				switch typ {
+				case networkmanager.ActiveConnectionEthernet:
+					var label string
+					switch state {
+					case networkmanager.ActiveConnectionStateActivating:
+						label = "activating..."
+					case networkmanager.ActiveConnectionStateActivated:
+						label = "up"
+					case networkmanager.ActiveConnectionStateDeactivating:
+						label = "deactivating..."
+					case networkmanager.ActiveConnectionStateDeactivated:
+						label = "down"
+					}
+					block.FullText = fmt.Sprintf("%s %s", networkIconEthernet, label)
+
+				case networkmanager.ActiveConnectionWireless:
+					status, err := getWifiStatus(conn)
+					if err != nil {
+						log.Println("failed to get wifi status:", err)
+					}
+
+					var label string
+					switch state {
+					case networkmanager.ActiveConnectionStateActivating:
+						label = "activating..."
+					case networkmanager.ActiveConnectionStateActivated:
+						label = ""
+					case networkmanager.ActiveConnectionStateDeactivating:
+						label = "deactivating..."
+					case networkmanager.ActiveConnectionStateDeactivated:
+						label = "down"
+					}
+
+					block.FullText = fmt.Sprintf("%s%s%s", networkIconWireless, status, label)
+
+				case networkmanager.ActiveConnectionBridge:
+
+				default:
+					log.Println("unexpected connection type:", typ)
+					continue
+				}
+
+				blockChan <- block
 			}
 
-			blockChan <- block
+			for uuid, exists := range uuids {
+				if !exists {
+					blockChan <- Block{
+						Name:     "20-networking",
+						Instance: uuid,
+						Remove:   true,
+					}
+				}
+			}
+
+			select {
+			case <-time.After(10 * time.Second):
+			case <-ctx.Done():
+				break
+			}
 		}
 
 		return nil
