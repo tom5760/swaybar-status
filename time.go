@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-const timeFormat = "Mon Jan _2, 2006 3:04PM"
+const timeFormat = "Mon Jan 2, 2006 3:04PM"
 
 func statusTime(ctx context.Context, blockChan chan<- Block) func() error {
 	return func() error {
