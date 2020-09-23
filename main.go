@@ -14,8 +14,8 @@ import (
 )
 
 var (
-	inputReader  = io.Reader(os.Stdin)
-	outputWriter = io.Writer(os.Stdout)
+	inputReader  io.Reader = os.Stdin
+	outputWriter io.Writer = os.Stdout
 
 	header = Header{
 		Version:     1,
