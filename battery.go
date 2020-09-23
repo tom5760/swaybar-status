@@ -17,7 +17,7 @@ func statusBattery(ctx context.Context, blockChan chan<- Block) func() error {
 		}
 
 		block := Block{
-			Name: "10-battery",
+			Name: "20-battery",
 		}
 
 		reloadDev := func() (*upower.Device, error) {

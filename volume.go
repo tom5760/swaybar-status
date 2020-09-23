@@ -58,7 +58,7 @@ func statusVolume(ctx context.Context, blockChan chan<- Block) func() error {
 		)
 
 		block := Block{
-			Name: "20-volume",
+			Name: "10-volume",
 			ClickHandler: func(evt ClickEvent) {
 				switch evt.Button {
 				case 1:
