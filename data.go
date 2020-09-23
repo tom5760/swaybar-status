@@ -81,12 +81,15 @@ type Block struct {
 	// The type of markup to use when parsing the text for the block. This can
 	// either be pango or none (default).
 	Markup string `json:"markup,omitempty"`
+}
 
-	// Called when the block is clicked on.
-	ClickHandler func(ClickEvent) `json:"-"`
+type BlockKey struct {
+	Name     string
+	Instance string
+}
 
-	// If true, block is removed from the status line instead of added.
-	Remove bool `json:"-"`
+func (b *Block) Key() BlockKey {
+	return BlockKey{Name: b.Name, Instance: b.Instance}
 }
 
 // ClickEvents are reported if requested in the header.

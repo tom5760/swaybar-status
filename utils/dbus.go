@@ -175,6 +175,20 @@ func (o *DBusObject) PropertySliceUint32(name string) ([]uint32, error) {
 	return x, nil
 }
 
+func (o *DBusObject) PropertySliceString(name string) ([]string, error) {
+	v, err := o.Property(name)
+	if err != nil {
+		return nil, err
+	}
+
+	x, ok := v.([]string)
+	if !ok {
+		return nil, fmt.Errorf("unexpected variant type; got %T; expected %T", v, x)
+	}
+
+	return x, nil
+}
+
 func (o *DBusObject) PropertySliceObjectPath(name string) ([]dbus.ObjectPath, error) {
 	v, err := o.Property(name)
 	if err != nil {
