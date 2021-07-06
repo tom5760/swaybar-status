@@ -106,6 +106,7 @@ func statusNetwork(ctx context.Context, sb *StatusBar) error {
 					Name:     "30-networking",
 					Instance: uuid,
 				})
+				delete(uuids, uuid)
 			}
 		}
 

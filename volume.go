@@ -4,10 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math"
 	"os/exec"
 
-	"github.com/tom5760/swaybar-status/pulseaudio"
+	"github.com/lawl/pulseaudio"
 )
 
 const (
@@ -16,45 +15,21 @@ const (
 	speakerMed   = "🔉"
 	speakerHigh  = "🔊"
 
-	volumeScrollDelta = 2
+	volumeScrollDelta = .02
 )
 
-func volumeToPercent(v []uint32) int {
-	if len(v) == 0 {
-		return 0
-	}
-
-	return int(math.Round(float64(v[0]) / pulseaudio.VolumeNorm * 100))
-}
-
-func percentToVolume(p int) []uint32 {
-	if p > 100 {
-		p = 100
-	}
-
-	if p < 0 {
-		p = 0
-	}
-
-	return []uint32{uint32(math.Round((float64(p) / 100) * pulseaudio.VolumeNorm))}
-}
-
 func statusVolume(ctx context.Context, sb *StatusBar) error {
-	core, err := pulseaudio.New()
+	client, err := pulseaudio.NewClient()
 	if err != nil {
-		return fmt.Errorf("failed to create pulseaudio: %w", err)
+		return fmt.Errorf("failed to create pulseaudio client: %w", err)
 	}
 
-	var (
-		volChan  <-chan []uint32
-		muteChan <-chan bool
+	defer client.Close()
 
-		unsubVol, unsubMute func()
-
-		curSink *pulseaudio.Device
-		percent int
-		muted   bool
-	)
+	updates, err := client.Updates()
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to pulseaudio updates: %w", err)
+	}
 
 	block := Block{
 		Name: "10-volume",
@@ -63,7 +38,7 @@ func statusVolume(ctx context.Context, sb *StatusBar) error {
 	sb.OnClick(block.Key(), func(evt ClickEvent) {
 		switch evt.Button {
 		case 1:
-			if err := curSink.SetMute(!muted); err != nil {
+			if _, err := client.ToggleMute(); err != nil {
 				log.Println("failed to toggle mute:", err)
 			}
 
@@ -73,121 +48,73 @@ func statusVolume(ctx context.Context, sb *StatusBar) error {
 			}
 
 		case 4:
-			v := percentToVolume(percent + volumeScrollDelta)
-			if err := curSink.SetVolume(v); err != nil {
-				log.Println("failed to raise volume:", err)
-			}
+			setVolume(client, volumeScrollDelta)
 
 		case 5:
-			v := percentToVolume(percent - volumeScrollDelta)
-			if err := curSink.SetVolume(v); err != nil {
-				log.Println("failed to lower volume:", err)
-			}
+			setVolume(client, -volumeScrollDelta)
 		}
 	})
 
-	defer func() {
-		if unsubVol != nil {
-			unsubVol()
-		}
-		if unsubMute != nil {
-			unsubMute()
-		}
-	}()
+	updateVolumeBlock(sb, client)
 
-	updateStatus := func() {
-		var icon string
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+
+		case <-updates:
+			updateVolumeBlock(sb, client)
+		}
+	}
+}
+
+func updateVolumeBlock(sb *StatusBar, client *pulseaudio.Client) {
+	block := Block{
+		Name:     "10-volume",
+		FullText: "Error",
+	}
+
+	volume, err := client.Volume()
+	if err != nil {
+		log.Printf("failed to get volume: %v", err)
+		sb.Update(block)
+		return
+	}
+
+	muted, err := client.Mute()
+	if err != nil {
+		log.Printf("failed to get mute state: %v", err)
+		sb.Update(block)
+		return
+	}
+
+	icon := speakerMuted
+
+	if !muted {
 		switch {
-		case percent == 0:
+		case volume == 0:
 			icon = speakerLow
-		case percent <= 50:
+		case volume <= .5:
 			icon = speakerMed
 		default:
 			icon = speakerHigh
 		}
-
-		if muted {
-			icon = speakerMuted
-		}
-
-		block.FullText = fmt.Sprintf("%s%v%%", icon, percent)
-		sb.Update(block)
 	}
 
-	reloadSink := func(sink *pulseaudio.Device) error {
-		if unsubVol != nil {
-			unsubVol()
-			unsubVol = nil
-		}
-		if unsubMute != nil {
-			unsubMute()
-			unsubMute = nil
-		}
+	block.FullText = fmt.Sprintf("%s%.0f%%", icon, volume*100)
 
-		var err error
+	sb.Update(block)
+}
 
-		if sink == nil {
-			if sink, err = core.FallbackSink(); err != nil {
-				return fmt.Errorf("failed to get fallback sink: %w", err)
-			}
-		}
-
-		volume, err := sink.Volume()
-		if err != nil {
-			return fmt.Errorf("failed to get sink volume: %w", err)
-		}
-
-		percent = volumeToPercent(volume)
-
-		if muted, err = sink.Mute(); err != nil {
-			return fmt.Errorf("failed to get sink mute: %w", err)
-		}
-
-		volChan, unsubVol, err = sink.SubscribeVolumeUpdated()
-		if err != nil {
-			return fmt.Errorf("failed to subscribe to volume events: %w", err)
-		}
-
-		muteChan, unsubMute, err = sink.SubscribeMuteUpdated()
-		if err != nil {
-			return fmt.Errorf("failed to subscribe to mute events: %w", err)
-		}
-
-		curSink = sink
-
-		updateStatus()
-		return nil
-	}
-
-	if err := reloadSink(nil); err != nil {
-		return err
-	}
-
-	sinkChan, sinkUnsub, err := core.SubscribeFallbackSinkUpdated()
+func setVolume(client *pulseaudio.Client, diff float32) {
+	volume, err := client.Volume()
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to fallback sink changes: %w", err)
-	}
-	defer sinkUnsub()
-
-	for ctx.Err() == nil {
-		select {
-		case sink := <-sinkChan:
-			if err := reloadSink(sink); err != nil {
-				return err
-			}
-
-		case volume := <-volChan:
-			log.Println("AAAAAAAAAAAAA:", volume)
-			percent = volumeToPercent(volume)
-			updateStatus()
-
-		case muted = <-muteChan:
-			updateStatus()
-
-		case <-ctx.Done():
-			return nil
-		}
+		log.Printf("failed to get volume: %v", err)
+		return
 	}
 
-	return nil
+	if err := client.SetVolume(volume + diff); err != nil {
+		log.Printf("failed to set volume: %v", err)
+		return
+	}
 }

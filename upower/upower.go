@@ -150,13 +150,13 @@ func (u *UPower) GetCriticalAction() (string, error) {
 
 // Subscribes to a signal emitted when a device is added.  Returns a channel to
 // receive added devices, and a unsubscription function.
-func (u *UPower) SubscribeDeviceAdded() (<-chan *Device, func(), error) {
+func (u *UPower) SubscribeDeviceAdded() (<-chan *Device, utils.UnsubFunc, error) {
 	conn, err := dbus.SystemBus()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create system bus: %w", err)
 	}
 
-	sigChan, unsubSig, err := utils.
+	sigChan, unsub, err := utils.
 		DBusSignalSubscribe(conn, upowerSigDeviceAdded)
 
 	if err != nil {
@@ -167,23 +167,18 @@ func (u *UPower) SubscribeDeviceAdded() (<-chan *Device, func(), error) {
 
 	go deviceSigChanLoop(sigChan, devChan)
 
-	unsub := func() {
-		close(devChan)
-		unsubSig()
-	}
-
 	return devChan, unsub, nil
 }
 
 // Subscribes to a signal emitted when a device is removed.  Returns a channel to
 // receive removed devices, and a unsubscription function.
-func (u *UPower) SubscribeDeviceRemoved() (<-chan *Device, func(), error) {
+func (u *UPower) SubscribeDeviceRemoved() (<-chan *Device, utils.UnsubFunc, error) {
 	conn, err := dbus.SystemBus()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create system bus: %w", err)
 	}
 
-	sigChan, unsubSig, err := utils.
+	sigChan, unsub, err := utils.
 		DBusSignalSubscribe(conn, upowerSigDeviceRemoved)
 
 	if err != nil {
@@ -194,15 +189,12 @@ func (u *UPower) SubscribeDeviceRemoved() (<-chan *Device, func(), error) {
 
 	go deviceSigChanLoop(sigChan, devChan)
 
-	unsub := func() {
-		close(devChan)
-		unsubSig()
-	}
-
 	return devChan, unsub, nil
 }
 
 func deviceSigChanLoop(sigChan <-chan *dbus.Signal, devChan chan<- *Device) {
+	defer close(devChan)
+
 	for sig := range sigChan {
 		var objPath dbus.ObjectPath
 		if err := dbus.Store(sig.Body, &objPath); err != nil {

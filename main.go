@@ -17,7 +17,7 @@ var (
 	statusFuncs = []func(context.Context, *StatusBar) error{
 		statusBattery,
 		statusNetwork,
-		//    statusPlayer,
+		//statusPlayer,
 		statusTime,
 		statusVolume,
 	}
@@ -43,25 +43,36 @@ func run() error {
 		}
 	}()
 
-	group, ctx := errgroup.WithContext(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	group.Go(func() error {
-		return recv(ctx, sb)
-	})
+	group, ctx := errgroup.WithContext(ctx)
 
-	for _, statusFunc := range statusFuncs {
+	go recv(ctx, cancel, sb)
+
+	for i, statusFunc := range statusFuncs {
+		n := i
 		fn := statusFunc
-		group.Go(func() error { return fn(ctx, sb) })
+		group.Go(func() error {
+			if err := fn(ctx, sb); err != nil {
+				return fmt.Errorf("status function %v failed: %w", n, err)
+			}
+
+			log.Printf("function %v finished", n)
+			return nil
+		})
 	}
 
 	if err := group.Wait(); err != nil {
-		return fmt.Errorf("status failed: %w", err)
+		return err
 	}
 
 	return nil
 }
 
-func recv(ctx context.Context, sb *StatusBar) error {
+func recv(ctx context.Context, cancel context.CancelFunc, sb *StatusBar) error {
+	defer cancel()
+
 	decoder := json.NewDecoder(inputReader)
 
 	tok, err := decoder.Token()

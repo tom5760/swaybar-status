@@ -8,8 +8,7 @@ import (
 	"log"
 
 	"github.com/godbus/dbus/v5"
-
-	"github.com/tom5760/swaybar-status/utils"
+	"github.com/lawl/pulseaudio"
 )
 
 const (
@@ -34,47 +33,23 @@ const (
 )
 
 type Core struct {
-	conn *dbus.Conn
-	obj  *utils.DBusObject
+	client *pulseaudio.Client
 }
 
 func New() (*Core, error) {
-	sessionbus, err := dbus.SessionBus()
+	client, err := pulseaudio.NewClient()
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to session bus: %w", err)
-	}
-
-	lookup := utils.NewDBusObject(sessionbus, sessionIface, lookupPath)
-
-	addr, err := lookup.PropertyString(lookupPropAddress)
-	if err != nil {
-		return nil, fmt.Errorf("failed to lookup server address: %w", err)
-	}
-
-	conn, err := dbus.Dial(addr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to pulseaudio bus: %w", err)
-	}
-
-	if err := conn.Auth(nil); err != nil {
-		return nil, fmt.Errorf("failed to authenticate to pulseaudio bus: %w", err)
+		return nil, fmt.Errorf("failed to create pulseaudio client: %w", err)
 	}
 
 	return &Core{
-		conn: conn,
-		obj:  utils.NewDBusObject(conn, coreIface, corePath),
+		client: client,
 	}, nil
 }
 
-func (c *Core) Name() (string, error) {
-	return c.obj.PropertyString(corePropName)
+func (c *Core) Close() {
+	return c.client.Close()
 }
-
-func (c *Core) FallbackSink() (*Device, error) {
-	path, err := c.obj.PropertyObjectPath(corePropFallbackSink)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get object path: %w", err)
-	}
 
 	return newDevice(c, path), nil
 }
@@ -143,7 +118,7 @@ func (c *Core) stopListeningForSignal(name string) error {
 }
 
 func (c *Core) SubscribeFallbackSinkUpdated() (<-chan *Device, func(), error) {
-	sigChan, unsubSig, err := c.signalSubscribe(coreSigFallbackSinkUpdated)
+	sigChan, unsub, err := c.signalSubscribe(coreSigFallbackSinkUpdated)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -151,6 +126,7 @@ func (c *Core) SubscribeFallbackSinkUpdated() (<-chan *Device, func(), error) {
 	sinkChan := make(chan *Device, 1)
 
 	go func() {
+		defer close(sinkChan)
 		for sig := range sigChan {
 			var objPath dbus.ObjectPath
 			if err := dbus.Store(sig.Body, &objPath); err != nil {
@@ -161,11 +137,6 @@ func (c *Core) SubscribeFallbackSinkUpdated() (<-chan *Device, func(), error) {
 			sinkChan <- newDevice(c, objPath)
 		}
 	}()
-
-	unsub := func() {
-		unsubSig()
-		close(sinkChan)
-	}
 
 	return sinkChan, unsub, nil
 }

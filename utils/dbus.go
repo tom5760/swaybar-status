@@ -8,10 +8,38 @@ import (
 	"github.com/godbus/dbus/v5"
 )
 
-// DBusObject wraps dbus.BusObject and adds a few more convenience methods.
-type DBusObject struct {
-	obj dbus.BusObject
-}
+const (
+	dbusInterface = "org.freedesktop.DBus"
+
+	dbusMethodListNames = dbusInterface + ".ListNames"
+
+	dbusSignalNameOwnerChanged = dbusInterface + ".NameOwnerChange"
+
+	propertiesInterface = dbusInterface + ".Properties"
+
+	propertiesSignalChanged = propertiesInterface + ".PropertiesChanged"
+)
+
+type (
+	// DBusObject wraps dbus.BusObject and adds a few more convenience methods.
+	DBusObject struct {
+		obj dbus.BusObject
+	}
+
+	PropertiesChange struct {
+		Signal                *dbus.Signal
+		InterfaceName         string
+		ChangedProperties     map[string]interface{}
+		InvalidatedProperties []string
+	}
+
+	NameOwnerChange struct {
+		Signal                   *dbus.Signal
+		Name, OldOwner, NewOwner string
+	}
+
+	UnsubFunc func()
+)
 
 // NewDBusObject creates and wraps the given dbus object.
 func NewDBusObject(conn *dbus.Conn, dest string, path dbus.ObjectPath) *DBusObject {
@@ -203,7 +231,7 @@ func (o *DBusObject) PropertySliceObjectPath(name string) ([]dbus.ObjectPath, er
 	return x, nil
 }
 
-func DBusSignalSubscribe(conn *dbus.Conn, name string) (<-chan *dbus.Signal, func(), error) {
+func DBusSignalSubscribe(conn *dbus.Conn, name string, opts ...dbus.MatchOption) (<-chan *dbus.Signal, UnsubFunc, error) {
 	iface := ""
 
 	i := strings.LastIndex(name, ".")
@@ -213,10 +241,10 @@ func DBusSignalSubscribe(conn *dbus.Conn, name string) (<-chan *dbus.Signal, fun
 
 	member := name[i+1:]
 
-	matchOptions := []dbus.MatchOption{
+	matchOptions := append([]dbus.MatchOption{
 		dbus.WithMatchInterface(iface),
 		dbus.WithMatchMember(member),
-	}
+	}, opts...)
 
 	if err := conn.AddMatchSignal(matchOptions...); err != nil {
 		return nil, nil, fmt.Errorf("failed to add match signal: %w", err)
@@ -261,4 +289,77 @@ func DBusSignalSubscribe(conn *dbus.Conn, name string) (<-chan *dbus.Signal, fun
 	}
 
 	return filterSigChan, cancel, nil
+}
+
+func DBusSubscribePropertyChanges(conn *dbus.Conn, opts ...dbus.MatchOption) (<-chan PropertiesChange, UnsubFunc, error) {
+	sigChan, unsub, err := DBusSignalSubscribe(
+		conn, propertiesSignalChanged, opts...)
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	changeChan := make(chan PropertiesChange, 1)
+
+	go func() {
+		defer close(changeChan)
+		for sig := range sigChan {
+			change := PropertiesChange{Signal: sig}
+			if err := dbus.Store(
+				sig.Body,
+				&change.InterfaceName,
+				&change.ChangedProperties,
+				&change.InvalidatedProperties,
+			); err != nil {
+				log.Println("failed to store signal:", err)
+				continue
+			}
+
+			changeChan <- change
+		}
+	}()
+
+	return changeChan, unsub, nil
+}
+
+// DBusListNames lists names on the bus.
+func DBusListNames(bus dbus.BusObject) ([]string, error) {
+	var names []string
+	if err := bus.Call(dbusMethodListNames, 0).Store(&names); err != nil {
+		return nil, err
+	}
+
+	return names, nil
+}
+
+func DBusSubscribeNameOwnerChanged(conn *dbus.Conn, opts ...dbus.MatchOption) (<-chan NameOwnerChange, UnsubFunc, error) {
+	sigChan, unsub, err := DBusSignalSubscribe(
+		conn, dbusSignalNameOwnerChanged, opts...)
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	changeChan := make(chan NameOwnerChange, 1)
+
+	go func() {
+		defer close(changeChan)
+
+		for sig := range sigChan {
+			change := NameOwnerChange{Signal: sig}
+			if err := dbus.Store(
+				sig.Body,
+				&change.Name,
+				&change.OldOwner,
+				&change.NewOwner,
+			); err != nil {
+				log.Println("failed to store signal:", err)
+				continue
+			}
+
+			changeChan <- change
+		}
+	}()
+
+	return changeChan, unsub, nil
 }

@@ -60,7 +60,7 @@ func (d *Device) SetMute(mute bool) error {
 }
 
 func (d *Device) SubscribeVolumeUpdated() (<-chan []uint32, func(), error) {
-	sigChan, unsubSig, err := d.core.signalSubscribe(deviceSigVolumeUpdated)
+	sigChan, unsub, err := d.core.signalSubscribe(deviceSigVolumeUpdated)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to start listenting for signal: %w", err)
 	}
@@ -68,6 +68,8 @@ func (d *Device) SubscribeVolumeUpdated() (<-chan []uint32, func(), error) {
 	volChan := make(chan []uint32, 1)
 
 	go func() {
+		defer close(volChan)
+
 		for sig := range sigChan {
 			var volume []uint32
 			if err := dbus.Store(sig.Body, &volume); err != nil {
@@ -79,16 +81,11 @@ func (d *Device) SubscribeVolumeUpdated() (<-chan []uint32, func(), error) {
 		}
 	}()
 
-	unsub := func() {
-		unsubSig()
-		close(volChan)
-	}
-
 	return volChan, unsub, nil
 }
 
 func (d *Device) SubscribeMuteUpdated() (<-chan bool, func(), error) {
-	sigChan, unsubSig, err := d.core.signalSubscribe(deviceSigMuteUpdated)
+	sigChan, unsub, err := d.core.signalSubscribe(deviceSigMuteUpdated)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -96,6 +93,8 @@ func (d *Device) SubscribeMuteUpdated() (<-chan bool, func(), error) {
 	muteChan := make(chan bool, 1)
 
 	go func() {
+		defer close(muteChan)
+
 		for sig := range sigChan {
 			var mute bool
 			if err := dbus.Store(sig.Body, &mute); err != nil {
@@ -106,11 +105,6 @@ func (d *Device) SubscribeMuteUpdated() (<-chan bool, func(), error) {
 			muteChan <- mute
 		}
 	}()
-
-	unsub := func() {
-		unsubSig()
-		close(muteChan)
-	}
 
 	return muteChan, unsub, nil
 }
