@@ -113,7 +113,17 @@ func setVolume(client *pulseaudio.Client, diff float32) {
 		return
 	}
 
-	if err := client.SetVolume(volume + diff); err != nil {
+	next := volume + diff
+
+	if next > 1 {
+		next = 1
+	}
+
+	if next < 0 {
+		next = 0
+	}
+
+	if err := client.SetVolume(next); err != nil {
 		log.Printf("failed to set volume: %v", err)
 		return
 	}
